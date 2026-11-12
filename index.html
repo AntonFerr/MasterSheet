@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111a18">
+  <title>MasterFicha — seu arquivo de personagens</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="MasterFicha, início">
+        <span class="brand-mark" aria-hidden="true">M<span>✦</span></span>
+        <span><strong>MasterFicha</strong><small>arquivo de personagens</small></span>
+      </a>
+      <div class="side-label">BIBLIOTECA</div>
+      <nav aria-label="Navegação principal">
+        <button class="nav-link active" id="nav-library"><span class="nav-icon">▤</span> Todas as fichas <span class="nav-count" id="total-count">0</span></button>
+      </nav>
+      <div class="rpg-heading"><span class="side-label">SEUS RPGS</span><button id="add-rpg-open" class="icon-button" aria-label="Adicionar RPG" title="Adicionar RPG">＋</button></div>
+      <div id="rpg-list" class="rpg-list"></div>
+      <div class="sidebar-bottom"><span class="status-dot"></span><span>Seus dados ficam salvos neste dispositivo.</span></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>Biblioteca</span><span class="crumb-divider">/</span><strong id="crumb-current">Todas as fichas</strong></div>
+        <button class="button button-primary top-create" id="new-ficha"><span>＋</span> Nova ficha</button>
+      </header>
+      <section class="page-intro">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> SEU UNIVERSO, ORGANIZADO</div>
+          <h1 id="page-title">Todas as fichas<span class="title-period">.</span></h1>
+          <p id="page-description">Personagens, histórias e aventuras em um só lugar.</p>
+        </div>
+        <div class="intro-stamp" aria-hidden="true"><span>✦</span><small>RPG<br>ARCHIVE</small></div>
+      </section>
+      <section class="toolbar" aria-label="Filtros de fichas">
+        <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Buscar personagem, RPG ou tag..." aria-label="Buscar fichas"><kbd>⌘ K</kbd></label>
+        <div class="filter-wrap"><label for="filter-rpg">RPG</label><select id="filter-rpg"><option value="">Todos os RPGs</option></select></div>
+        <div class="view-label"><span class="view-grid-icon">▦</span> Grade</div>
+      </section>
+      <div class="results-meta"><span id="results-count">0 fichas</span><span class="results-rule"></span><span id="results-context">RECENTES</span></div>
+      <section id="cards" class="card-grid" aria-live="polite"></section>
+      <section id="empty" class="empty-state" hidden>
+        <div class="empty-symbol">✦</div><h2 id="empty-title">Sua próxima aventura começa aqui.</h2><p id="empty-copy">Crie um RPG e depois adicione sua primeira ficha de personagem.</p>
+        <button class="button button-primary" id="empty-action">＋ Criar um RPG</button>
+      </section>
+      <footer class="page-footer"><span>MASTERFICHA <span class="footer-dot">✦</span> UM LUGAR PARA CADA HISTÓRIA</span><span id="footer-total">0 personagens guardados</span></footer>
+    </main>
+  </div>
+
+  <dialog id="rpg-dialog" class="modal">
+    <form id="rpg-form" class="modal-form">
+      <div class="modal-top"><div class="modal-mark">✦</div><button type="button" class="close-button" data-close="rpg-dialog" aria-label="Fechar">×</button></div>
+      <div class="eyebrow">ORGANIZE SUA BIBLIOTECA</div><h2>Novo RPG</h2><p class="modal-subtitle">Cadastre um sistema para agrupar suas fichas.</p>
+      <label class="field-label" for="rpg-name">Nome do RPG</label><input class="text-input" id="rpg-name" maxlength="80" placeholder="Ex.: Dungeons & Dragons" required>
+      <div class="form-error" id="rpg-error" role="alert"></div>
+      <div class="modal-actions"><button type="button" class="button button-quiet" data-close="rpg-dialog">Cancelar</button><button class="button button-primary" type="submit">Criar RPG <span>→</span></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ficha-dialog" class="modal ficha-modal">
+    <form id="ficha-form" class="modal-form">
+      <div class="modal-top"><div class="modal-mark">✦</div><button type="button" class="close-button" data-close="ficha-dialog" aria-label="Fechar">×</button></div>
+      <div class="eyebrow">UMA NOVA HISTÓRIA</div><h2 id="ficha-modal-title">Criar ficha</h2><p class="modal-subtitle">Cada personagem recebe um identificador único automaticamente.</p>
+      <input type="hidden" id="ficha-id">
+      <div class="form-row"><div class="field-group"><label class="field-label" for="ficha-name">Nome do personagem <span>*</span></label><input class="text-input" id="ficha-name" maxlength="120" placeholder="Ex.: Kael Ventobravo" required></div>
+      <div class="field-group"><label class="field-label" for="ficha-rpg">RPG associado <span>*</span></label><select class="text-input" id="ficha-rpg" required></select></div></div>
+      <label class="field-label" for="ficha-history">História</label><textarea class="text-input textarea" id="ficha-history" maxlength="10000" placeholder="De onde veio? O que busca? Escreva a história do personagem..."></textarea>
+      <div class="form-row collection-row">
+        <fieldset class="collection"><legend>Atributos</legend><p>Use números ou fórmulas aritméticas; referencie outro atributo entre parênteses, por exemplo: (Resistência)*2.</p><div id="attributes-rows"></div><datalist id="attribute-options"></datalist><button type="button" class="add-row" data-add="attributes">＋ Adicionar atributo</button></fieldset>
+        <fieldset class="collection"><legend>Poderes e habilidades</legend><p>O que torna este personagem único?</p><div id="powers-rows"></div><button type="button" class="add-row" data-add="powers">＋ Adicionar poder</button></fieldset>
+      </div>
+      <fieldset class="collection inventory-collection"><legend>Inventário</legend><p>Itens que o personagem carrega consigo.</p><div id="inventory-rows"></div><button type="button" class="add-row" data-add="inventory">＋ Adicionar item</button></fieldset>
+      <label class="field-label" for="ficha-tags">Tags <span class="field-hint">separadas por vírgula</span></label><input class="text-input" id="ficha-tags" maxlength="600" placeholder="Ex.: mago, campanha-norte, nível-5">
+      <div class="form-error" id="ficha-error" role="alert"></div>
+      <div class="modal-actions"><button type="button" class="button button-quiet" data-close="ficha-dialog">Cancelar</button><button class="button button-primary" type="submit">Salvar ficha <span>→</span></button></div>
+    </form>
+  </dialog>
+  <dialog id="profile-dialog" class="modal profile-modal">
+    <div class="modal-form">
+      <div class="modal-top"><div class="modal-mark">✦</div><button type="button" class="close-button" data-close="profile-dialog" aria-label="Fechar">×</button></div>
+      <div class="eyebrow">FICHA DE PERSONAGEM</div><h2 id="profile-title">Personagem</h2>
+      <p class="modal-subtitle"><span id="profile-rpg"></span><span class="profile-id" id="profile-id"></span></p>
+      <div class="profile-tabs" role="tablist" aria-label="Abas da ficha">
+        <button type="button" class="profile-tab active" role="tab" aria-selected="true" data-profile-tab="summary">Resumo</button>
+        <button type="button" class="profile-tab" role="tab" aria-selected="false" data-profile-tab="powers">Poderes</button>
+        <button type="button" class="profile-tab" role="tab" aria-selected="false" data-profile-tab="treino">Treinos</button>
+        <button type="button" class="profile-tab" role="tab" aria-selected="false" data-profile-tab="missao">Missões</button>
+        <button type="button" class="profile-tab" role="tab" aria-selected="false" data-profile-tab="evento">Eventos</button>
+      </div>
+      <section id="profile-summary" class="profile-panel" role="tabpanel"></section>
+      <section id="profile-powers-panel" class="profile-panel" role="tabpanel" hidden>
+        <div class="powers-panel-heading"><div><h3>Ativar habilidades</h3><p>Selecione uma ou mais habilidades para ver seus efeitos nos atributos.</p></div><span id="active-power-count" class="active-power-count">0 ativas</span></div>
+        <div id="power-toggles" class="power-toggles"></div>
+        <div class="modified-status-heading"><div><h3>Atributos modificados</h3><p>Ganhos dos registros são aplicados antes dos poderes; poderes seguem a ordem cadastrada na ficha.</p></div><span class="modified-key">BASE <b>→</b> ATUAL</span></div>
+        <div id="modified-attributes" class="modified-attributes"></div>
+      </section>
+      <section id="profile-records-panel" class="profile-panel" role="tabpanel" hidden>
+        <div class="records-heading"><div><h3 id="records-heading-title">Registros</h3><p>Imagem, descrição e ganhos registrados nesta ficha.</p></div><button type="button" class="button button-primary" id="record-create">＋ Novo registro</button></div>
+        <form id="record-form" class="record-form" hidden>
+          <div class="record-form-title">Adicionar registro <span id="record-kind-label"></span></div>
+          <div class="form-row"><div><label class="field-label" for="record-date">Data <span>*</span></label><input class="text-input" id="record-date" type="date" required></div><div><label class="field-label" for="record-image">Imagem <span>*</span></label><input class="text-input file-input" id="record-image" type="file" accept="image/png,image/jpeg,image/webp" required><span class="field-hint">PNG, JPEG ou WebP · até 2 MB</span></div></div>
+          <label class="field-label" for="record-description">O que foi recebido? <span>*</span></label><textarea class="text-input textarea" id="record-description" maxlength="3000" placeholder="Descreva o resultado, recompensa ou aprendizado..." required></textarea>
+          <div class="record-gains-head"><div><label class="field-label">Ganhos de atributos</label><span class="field-hint">opcional · preencha apenas os atributos que aumentaram</span></div></div>
+          <div id="record-gains"></div><div class="form-error" id="record-error" role="alert"></div>
+          <div class="modal-actions"><button type="button" class="button button-quiet" id="record-cancel">Cancelar</button><button class="button button-primary" type="submit">Salvar registro <span>→</span></button></div>
+        </form>
+        <div id="record-list" class="record-list"></div>
+      </section>
+    </div>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
