@@ -69,10 +69,19 @@
       <div class="field-group"><label class="field-label" for="ficha-rpg">RPG associado <span>*</span></label><select class="text-input" id="ficha-rpg" required></select></div></div>
       <label class="field-label" for="ficha-history">História</label><textarea class="text-input textarea" id="ficha-history" maxlength="10000" placeholder="De onde veio? O que busca? Escreva a história do personagem..."></textarea>
       <div class="form-row collection-row">
-        <fieldset class="collection"><legend>Atributos</legend><p>Use números ou fórmulas aritméticas; referencie outro atributo entre parênteses, por exemplo: (Resistência)*2.</p><div id="attributes-rows"></div><datalist id="attribute-options"></datalist><button type="button" class="add-row" data-add="attributes">＋ Adicionar atributo</button></fieldset>
+        <fieldset class="collection"><legend>Atributos</legend><p>Use fórmulas como =MÍNIMO(100; INT((1+RAIZ(1+8*(Nome do atributo)/100))/2)). Também há SE, E, OU, NAO, MÁXIMO, SOMA, MÉDIA, ABS, ARRED, POTÊNCIA e MOD. Use (Nome do atributo) no lugar de células como D2. As sugestões aparecem enquanto você digita.</p><div id="attributes-rows"></div><datalist id="attribute-options"></datalist><button type="button" class="add-row" data-add="attributes">＋ Adicionar atributo</button></fieldset>
         <fieldset class="collection"><legend>Poderes e habilidades</legend><p>O que torna este personagem único?</p><div id="powers-rows"></div><button type="button" class="add-row" data-add="powers">＋ Adicionar poder</button></fieldset>
       </div>
       <fieldset class="collection inventory-collection"><legend>Inventário</legend><p>Itens que o personagem carrega consigo.</p><div id="inventory-rows"></div><button type="button" class="add-row" data-add="inventory">＋ Adicionar item</button></fieldset>
+      <fieldset class="collection resource-materials-collection"><legend>Materiais de recursos</legend><p>Monte sua própria planilha: crie os campos que precisar e organize os materiais pela coluna escolhida.</p>
+        <div class="resource-toolbar">
+          <div class="resource-new-field"><input class="text-input" id="resource-field-name" maxlength="60" placeholder="Nome do novo campo" aria-label="Nome do novo campo"><button type="button" class="button button-quiet" id="resource-add-field">＋ Campo</button></div>
+          <div class="resource-sort"><label for="resource-sort-field">Ordenar por</label><select class="text-input" id="resource-sort-field" aria-label="Ordenar pela coluna"></select><select class="text-input" id="resource-sort-direction" aria-label="Direção da ordenação"><option value="asc">A → Z</option><option value="desc">Z → A</option></select></div>
+        </div>
+        <div id="resource-grid-wrap" class="resource-grid-wrap"><table id="resource-grid" class="resource-grid"><thead id="resource-grid-head"></thead><tbody id="resource-grid-body"></tbody></table><div id="resource-empty" class="resource-empty">Crie um campo para começar sua tabela de materiais.</div></div>
+        <button type="button" class="add-row resource-add-row" id="resource-add-row" hidden>＋ Adicionar material</button>
+        <div class="form-error" id="resource-error" role="alert"></div>
+      </fieldset>
       <label class="field-label" for="ficha-tags">Tags <span class="field-hint">separadas por vírgula</span></label><input class="text-input" id="ficha-tags" maxlength="600" placeholder="Ex.: mago, campanha-norte, nível-5">
       <div class="form-error" id="ficha-error" role="alert"></div>
       <div class="modal-actions"><button type="button" class="button button-quiet" data-close="ficha-dialog">Cancelar</button><button class="button button-primary" type="submit">Salvar ficha <span>→</span></button></div>
@@ -80,7 +89,7 @@
   </dialog>
   <dialog id="profile-dialog" class="modal profile-modal">
     <div class="modal-form">
-      <div class="modal-top"><div class="modal-mark">✦</div><button type="button" class="close-button" data-close="profile-dialog" aria-label="Fechar">×</button></div>
+      <div class="modal-top"><div class="modal-mark">✦</div><button type="button" class="button button-quiet export-records-button" id="export-records" title="Adicione registros para habilitar a exportação" disabled>↧ Exportar comprovantes</button><button type="button" class="close-button" data-close="profile-dialog" aria-label="Fechar">×</button></div>
       <div class="eyebrow">FICHA DE PERSONAGEM</div><h2 id="profile-title">Personagem</h2>
       <p class="modal-subtitle"><span id="profile-rpg"></span><span class="profile-id" id="profile-id"></span></p>
       <div class="profile-tabs" role="tablist" aria-label="Abas da ficha">

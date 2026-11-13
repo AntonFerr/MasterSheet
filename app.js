@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { rpgs: [], fichas: [], rpgFilter: "", search: "", profile: null, records: [], recordKind: "treino", activePowers: new Set() };
+const state = { rpgs: [], fichas: [], rpgFilter: "", search: "", profile: null, records: [], recordKind: "treino", activePowers: new Set(), resourceMaterials: { fields: [], rows: [] }, resourceSortField: "", resourceSortDirection: "asc" };
 let toastTimer;
+let formulaSuggestionTarget = null;
 
 async function api(url, options = {}) {
   const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
@@ -18,6 +19,82 @@ function esc(value = "") {
 function initials(name) { return (name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join("") || "✦").toUpperCase(); }
 function formatId(id) { return id.slice(0, 8).toUpperCase(); }
 function plural(count, one, many = `${one}s`) { return `${count} ${count === 1 ? one : many}`; }
+function evaluateFormula(source, resolveAttribute) {
+  let expression = String(source || "0").trim().replace(/^\\?=/, "").replace(/,/g, ".");
+  expression = expression.replace(/\(([^()]+)\)/g, (whole, name) => {
+    const value = resolveAttribute(name.trim());
+    return value === null ? whole : `(${value})`;
+  });
+  const tokens = expression.match(/\d+(?:\.\d+)?|[\p{L}_][\p{L}\p{N}_]*|>=|<=|<>|!=|==|\*\*|[+\-*/^=><();]/gu) || [];
+  if (tokens.join("").replace(/\s/g, "") !== expression.replace(/\s/g, "")) return null;
+  let position = 0;
+  const peek = () => tokens[position];
+  const take = () => tokens[position++];
+  const precedence = op => ({ "||": 1, "&&": 2, "=": 3, "==": 3, "<>": 3, "!=": 3, "<": 3, ">": 3, "<=": 3, ">=": 3, "+": 4, "-": 4, "*": 5, "/": 5, "^": 6, "**": 6 }[op] || 0);
+  function primary() {
+    const token = take();
+    if (token === undefined) throw new Error("expressão incompleta");
+    if (token === "+" || token === "-") return { type: "unary", op: token, value: primary() };
+    if (token === "(") { const value = parse(1); if (take() !== ")") throw new Error("parêntese inválido"); return value; }
+    if (/^\d/.test(token)) return { type: "number", value: Number(token) };
+    if (/^[\p{L}_]/u.test(token)) {
+      const name = token.toLocaleUpperCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (take() !== "(") throw new Error("função inválida");
+      const args = [];
+      if (peek() !== ")") { do { args.push(parse(1)); if (peek() !== ";" && peek() !== ",") break; take(); } while (true); }
+      if (take() !== ")") throw new Error("argumentos inválidos");
+      return { type: "call", name, args };
+    }
+    throw new Error("valor inválido");
+  }
+  function parse(minimum) {
+    let left = primary();
+    while (precedence(peek()) >= minimum && precedence(peek()) > 0) {
+      const op = take(), level = precedence(op);
+      const right = parse(level + (op === "^" || op === "**" ? 0 : 1));
+      left = { type: "binary", op, left, right };
+    }
+    return left;
+  }
+  function run(node) {
+    if (node.type === "number") return node.value;
+    if (node.type === "unary") return node.op === "-" ? -run(node.value) : run(node.value);
+    if (node.type === "call") {
+      const name = node.name;
+      if (name === "SE" && node.args.length === 3) return run(node.args[0]) ? run(node.args[1]) : run(node.args[2]);
+      if (name === "E" && node.args.length >= 1) return node.args.every(arg => Boolean(run(arg)));
+      if (name === "OU" && node.args.length >= 1) return node.args.some(arg => Boolean(run(arg)));
+      if (name === "NAO" && node.args.length === 1) return !run(node.args[0]);
+      const args = node.args.map(run);
+      if (name === "MINIMO" && args.length) return Math.min(...args);
+      if (name === "MAXIMO" && args.length) return Math.max(...args);
+      if (name === "SOMA" && args.length) return args.reduce((sum, value) => sum + value, 0);
+      if (name === "MEDIA" && args.length) return args.reduce((sum, value) => sum + value, 0) / args.length;
+      if (name === "INT" && args.length === 1) return Math.floor(args[0]);
+      if (name === "TRUNCAR" && (args.length === 1 || args.length === 2)) { const scale = 10 ** (args[1] || 0); return Math.trunc(args[0] * scale) / scale; }
+      if (name === "RAIZ" && args.length === 1) return Math.sqrt(args[0]);
+      if (name === "ABS" && args.length === 1) return Math.abs(args[0]);
+      if (name === "ARRED" && (args.length === 1 || args.length === 2)) { const scale = 10 ** (args[1] || 0); return Math.sign(args[0]) * Math.floor(Math.abs(args[0]) * scale + 0.5) / scale; }
+      if (name === "POTENCIA" && args.length === 2) return args[0] ** args[1];
+      if (name === "MOD" && args.length === 2) return args[0] - Math.floor(args[0] / args[1]) * args[1];
+      throw new Error("função ou quantidade de argumentos inválida");
+    }
+    const left = run(node.left), right = run(node.right);
+    switch (node.op) {
+      case "+": return left + right; case "-": return left - right; case "*": return left * right;
+      case "/": return left / right; case "^": case "**": return left ** right;
+      case "=": case "==": return left === right; case "<>": case "!=": return left !== right;
+      case "<": return left < right; case ">": return left > right; case "<=": return left <= right; case ">=": return left >= right;
+      default: throw new Error("operação inválida");
+    }
+  }
+  try {
+    const tree = parse(1);
+    if (position !== tokens.length) return null;
+    const value = run(tree);
+    return typeof value === "boolean" ? Number(value) : Number.isFinite(value) ? value : null;
+  } catch { return null; }
+}
 async function refresh() {
   const [rpgs, fichas] = await Promise.all([api("/api/rpgs"), api("/api/fichas")]);
   state.rpgs = rpgs; state.fichas = fichas; render();
@@ -76,6 +153,96 @@ function refreshAttributeOptions() {
   const names = [...$("#attributes-rows").querySelectorAll('[data-field="name"]')].map(input => input.value.trim()).filter(Boolean);
   $("#attribute-options").innerHTML = [...new Set(names)].map(name => `<option value="${esc(name)}"></option>`).join("");
 }
+function hideFormulaSuggestions() {
+  document.querySelector(".formula-suggestions")?.remove();
+  formulaSuggestionTarget = null;
+}
+function suggestFormula(input) {
+  hideFormulaSuggestions();
+  if (!input.matches('#attributes-rows [data-field="value"]')) return;
+  const before = input.value.slice(0, input.selectionStart);
+  const tail = before.match(/[\p{L}_]*$/u)?.[0] || "";
+  if (!tail) return;
+  const attrs = [...new Set([...$("#attributes-rows").querySelectorAll('[data-field="name"]')].map(field => field.value.trim()).filter(Boolean))];
+  const openParen = before.lastIndexOf("(");
+  const closeParen = before.lastIndexOf(")");
+  const insideReference = openParen > closeParen && !/[;><=+*/-]/.test(before.slice(openParen + 1));
+  const functionPosition = /(?:^=?\s*|[;,+\-*/=<>])\s*$/.test(before.slice(0, -tail.length));
+  let suggestions;
+  if (insideReference) suggestions = attrs.filter(name => name.toLocaleLowerCase("pt-BR").startsWith(tail.toLocaleLowerCase("pt-BR"))).map(name => ({ label: name, insert: `${name})`, cursor: name.length + 1 }));
+  else if (functionPosition) suggestions = ["SE", "E", "OU", "NAO", "MÍNIMO", "MÁXIMO", "SOMA", "MÉDIA", "INT", "TRUNCAR", "RAIZ", "ABS", "ARRED", "POTÊNCIA", "MOD"].filter(name => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").startsWith(tail.toLocaleUpperCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, ""))).map(name => ({ label: `${name}()`, insert: `${name}()`, cursor: name.length + 1 }));
+  else suggestions = [];
+  if (!suggestions.length) return;
+  const menu = document.createElement("div"); menu.className = "formula-suggestions"; menu.setAttribute("role", "listbox");
+  suggestions.forEach(item => {
+    const option = document.createElement("button"); option.type = "button"; option.textContent = item.label; option.setAttribute("role", "option");
+    option.addEventListener("mousedown", event => event.preventDefault());
+    option.addEventListener("click", () => {
+      const start = input.selectionStart - tail.length;
+      input.setRangeText(item.insert, start, input.selectionStart, "end");
+      input.setSelectionRange(start + item.cursor, start + item.cursor); input.focus(); hideFormulaSuggestions();
+    });
+    menu.append(option);
+  });
+  const rect = input.getBoundingClientRect();
+  menu.style.left = `${rect.left}px`; menu.style.top = `${rect.bottom + 3}px`; menu.style.width = `${Math.max(rect.width, 180)}px`;
+  document.body.append(menu); formulaSuggestionTarget = input;
+}
+function renderResourceMaterials() {
+  const { fields, rows } = state.resourceMaterials;
+  const sort = $("#resource-sort-field");
+  const priorSort = state.resourceSortField || sort.value;
+  sort.innerHTML = fields.map(field => `<option value="${esc(field.id)}">${esc(field.name)}</option>`).join("");
+  sort.disabled = fields.length === 0;
+  $("#resource-sort-direction").disabled = fields.length === 0;
+  state.resourceSortField = fields.some(field => field.id === priorSort) ? priorSort : (fields[0]?.id || "");
+  sort.value = state.resourceSortField;
+  $("#resource-sort-direction").value = state.resourceSortDirection;
+  $("#resource-add-row").hidden = fields.length === 0;
+  $("#resource-add-field").disabled = fields.length >= 30;
+  $("#resource-field-name").disabled = fields.length >= 30;
+  $("#resource-grid").hidden = fields.length === 0;
+  $("#resource-empty").hidden = fields.length > 0 && rows.length > 0;
+  $("#resource-empty").textContent = fields.length === 0 ? "Crie um campo para começar sua tabela de materiais." : "Nenhum material cadastrado. Use ‘Adicionar material’ para criar a primeira linha.";
+  $("#resource-grid-head").innerHTML = fields.length ? `<tr>${fields.map(field => `<th scope="col"><div class="resource-column-head"><span>${esc(field.name)}</span><button type="button" class="resource-remove-field" data-remove-resource-field="${esc(field.id)}" aria-label="Remover campo ${esc(field.name)}" title="Remover campo">×</button></div></th>`).join("")}<th scope="col" class="resource-actions-head"><span class="visually-hidden">Ações</span></th></tr>` : "";
+  const selectedField = fields.find(field => field.id === state.resourceSortField);
+  const sortedRows = [...rows].sort((left, right) => {
+    if (!selectedField) return 0;
+    const a = (left.values[selectedField.id] || "").trim();
+    const b = (right.values[selectedField.id] || "").trim();
+    if (!a || !b) return a ? -1 : b ? 1 : 0;
+    const result = a.localeCompare(b, "pt-BR", { sensitivity: "base" });
+    return state.resourceSortDirection === "desc" ? -result : result;
+  });
+  $("#resource-grid-body").innerHTML = sortedRows.map(row => `<tr>${fields.map(field => `<td><input class="resource-cell" data-resource-row="${esc(row.id)}" data-resource-field="${esc(field.id)}" value="${esc(row.values[field.id] || "")}" maxlength="500" aria-label="${esc(field.name)}"></td>`).join("")}<td class="resource-actions-cell"><button type="button" class="resource-remove-row" data-remove-resource-row="${esc(row.id)}" aria-label="Remover linha">×</button></td></tr>`).join("");
+}
+function addResourceField() {
+  const input = $("#resource-field-name"); const name = input.value.trim();
+  $("#resource-error").textContent = "";
+  if (!name) { $("#resource-error").textContent = "Digite um nome para o campo."; input.focus(); return; }
+  if (state.resourceMaterials.fields.length >= 30) { $("#resource-error").textContent = "A tabela permite até 30 campos."; return; }
+  if (state.resourceMaterials.fields.some(field => field.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"))) { $("#resource-error").textContent = "Já existe um campo com esse nome."; input.focus(); return; }
+  const field = { id: crypto.randomUUID(), name };
+  state.resourceMaterials.fields.push(field);
+  state.resourceMaterials.rows.forEach(row => { row.values[field.id] = ""; });
+  input.value = ""; renderResourceMaterials(); input.focus();
+}
+function addResourceRow() {
+  if (!state.resourceMaterials.fields.length) { $("#resource-error").textContent = "Crie pelo menos um campo antes de adicionar materiais."; return; }
+  if (state.resourceMaterials.rows.length >= 200) { $("#resource-error").textContent = "A tabela permite até 200 linhas."; return; }
+  const values = Object.fromEntries(state.resourceMaterials.fields.map(field => [field.id, ""]));
+  state.resourceMaterials.rows.push({ id: crypto.randomUUID(), values });
+  $("#resource-error").textContent = ""; renderResourceMaterials();
+  const last = $("#resource-grid-body").querySelector("tr:last-child .resource-cell"); last?.focus();
+}
+function removeResourceField(fieldId) {
+  const field = state.resourceMaterials.fields.find(item => item.id === fieldId);
+  if (!field) return;
+  if (state.resourceMaterials.rows.some(row => row.values[fieldId]?.trim()) && !confirm(`Remover o campo “${field.name}” e os valores preenchidos nesta coluna?`)) return;
+  state.resourceMaterials.fields = state.resourceMaterials.fields.filter(item => item.id !== fieldId);
+  state.resourceMaterials.rows.forEach(row => { delete row.values[fieldId]; });
+  renderResourceMaterials();
+}
 function readRows(type) {
   if (type === "powers") return [...$("#powers-rows").querySelectorAll(".power-editor-row")].map(row => ({
     name: row.querySelector('[data-field="name"]').value.trim(),
@@ -92,6 +259,8 @@ function resetFichaForm() {
   $("#ficha-id").value = ""; $("#ficha-form").reset(); $("#ficha-modal-title").textContent = "Criar ficha"; $("#ficha-error").textContent = "";
   for (const type of ["attributes", "powers", "inventory"]) $(`#${type}-rows`).replaceChildren();
   refreshAttributeOptions();
+  state.resourceMaterials = { fields: [], rows: [] }; state.resourceSortField = ""; state.resourceSortDirection = "asc";
+  $("#resource-field-name").value = ""; $("#resource-error").textContent = ""; renderResourceMaterials();
 }
 function openFichaDialog(ficha = null) {
   if (!state.rpgs.length) { openRpgDialog(); notify("Cadastre um RPG antes de criar uma ficha."); return; }
@@ -101,8 +270,10 @@ function openFichaDialog(ficha = null) {
     $("#ficha-name").value = ficha.name; $("#ficha-rpg").value = ficha.rpg_id; $("#ficha-history").value = ficha.history;
     $("#ficha-tags").value = ficha.tags.join(", ");
     for (const type of ["attributes", "powers", "inventory"]) ficha[type].forEach(row => addRow(type, row));
+    state.resourceMaterials = structuredClone(ficha.resource_materials || { fields: [], rows: [] });
   }
   refreshAttributeOptions();
+  renderResourceMaterials();
   $("#ficha-dialog").showModal(); $("#ficha-name").focus();
 }
 const recordLabels = { treino: "Treinos", missao: "Missões", evento: "Eventos" };
@@ -141,24 +312,19 @@ function profileStats() {
     if (values.has(key)) return values.get(key);
     if (trail.has(key)) return null;
     const nextTrail = new Set(trail); nextTrail.add(key);
-    let expression = String(attribute.value || "0").replace(/,/g, ".");
-    expression = expression.replace(/\(([^()]+)\)/g, (match, ref) => {
-      const dependency = attributes.get(ref.trim().toLocaleLowerCase("pt-BR"));
-      if (!dependency) return match;
-      const result = calculate(dependency, nextTrail);
-      return result === null ? "NaN" : String(result);
+    const bonus = gained.get(key)?.amount || 0;
+    const result = evaluateFormula(attribute.value, ref => {
+      const dependency = attributes.get(ref.toLocaleLowerCase("pt-BR"));
+      return dependency ? calculate(dependency, nextTrail) : null;
     });
-    if (!/^[\d\s.+\-*/()]+$/.test(expression)) return null;
-    try {
-      const result = Function(`"use strict"; return (${expression})`)();
-      if (!Number.isFinite(result)) return null;
-      values.set(key, result); return result;
-    } catch { return null; }
+    if (result === null) return null;
+    const currentValue = result + bonus;
+    values.set(key, currentValue); return currentValue;
   }
   return [...attributes.entries()].map(([key, attribute]) => {
     const calculated = calculate(attribute);
     const bonus = gained.get(key)?.amount || 0;
-    return { key, name: attribute.name, baseText: String(attribute.value || "0"), bonus, value: calculated === null ? null : calculated + bonus };
+    return { key, name: attribute.name, baseText: String(attribute.value || "0"), bonus, value: calculated };
   });
 }
 function fmtStat(value) { return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2))); }
@@ -170,7 +336,7 @@ function renderProfileSummary() {
     return `<div class="attribute-total"><span>${esc(stat.name)}</span><span class="attribute-values">${esc(stat.baseText)}${stat.baseText !== current ? ` <b>→ ${esc(current)}</b>` : ""}${stat.bonus ? ` <b>(+ ${fmtStat(stat.bonus)})</b>` : ""} <strong>${esc(current)}</strong></span></div>`;
   }).join("") || `<div class="profile-muted">Nenhum atributo cadastrado ainda.</div>`;
   const counts = Object.fromEntries(Object.keys(recordLabels).map(kind => [kind, state.records.filter(record => record.kind === kind).length]));
-  $("#profile-summary").innerHTML = `<div class="profile-summary-grid"><section class="profile-summary-block"><h3>Atributos atuais</h3><p>Valores base somados aos ganhos dos registros.</p><div class="attribute-list">${attributeMarkup}</div></section><section class="profile-summary-block"><h3>História</h3><p class="profile-history">${esc(ficha.history || "Ainda não há uma história registrada para este personagem.")}</p><div class="record-counts">${Object.entries(recordLabels).map(([kind, label]) => `<button type="button" class="record-count" data-profile-tab="${kind}"><span>${counts[kind]}</span>${label}</button>`).join("")}</div></section></div>`;
+  $("#profile-summary").innerHTML = `<div class="profile-summary-grid"><section class="profile-summary-block"><h3>Atributos atuais</h3><p>Fórmulas recalculadas com os ganhos dos registros.</p><div class="attribute-list">${attributeMarkup}</div></section><section class="profile-summary-block"><h3>História</h3><p class="profile-history">${esc(ficha.history || "Ainda não há uma história registrada para este personagem.")}</p><div class="record-counts">${Object.entries(recordLabels).map(([kind, label]) => `<button type="button" class="record-count" data-profile-tab="${kind}"><span>${counts[kind]}</span>${label}</button>`).join("")}</div></section></div>`;
 }
 const operationSymbols = { add: "+", subtract: "−", multiply: "×", divide: "÷" };
 function renderPowerView() {
@@ -212,10 +378,12 @@ async function openProfile(ficha) {
   state.profile = ficha; state.records = []; state.activePowers = new Set();
   $("#profile-title").textContent = ficha.name; $("#profile-rpg").textContent = ficha.rpg_name;
   $("#profile-id").textContent = `ID · ${ficha.id}`;
+  $("#export-records").disabled = true;
   $("#record-form").reset(); $("#record-form").hidden = true;
   $("#profile-dialog").showModal(); activateProfileTab("summary");
   try {
     state.records = await api(`/api/fichas/${encodeURIComponent(ficha.id)}/registros`);
+    $("#export-records").disabled = state.records.length === 0;
     renderProfileSummary();
   } catch (error) { $("#profile-summary").innerHTML = `<p class="form-error">${esc(error.message)}</p>`; }
 }
@@ -238,6 +406,31 @@ document.addEventListener("click", async event => {
   if (rpgButton) { state.rpgFilter = state.rpgFilter === rpgButton.dataset.rpg ? "" : rpgButton.dataset.rpg; render(); }
   if (event.target.closest("#nav-library")) { state.rpgFilter = ""; render(); }
   if (event.target.closest("#add-rpg-open")) openRpgDialog();
+  if (event.target.closest("#export-records")) {
+    const button = $("#export-records");
+    if (button.disabled || !state.profile) return;
+    const label = button.textContent; button.disabled = true; button.textContent = "Preparando…";
+    try {
+      const response = await fetch(`/api/fichas/${encodeURIComponent(state.profile.id)}/export`);
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload.error || "Não foi possível exportar os registros.");
+      }
+      const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a");
+      link.href = url; link.download = `masterficha-provas-${state.profile.id.slice(0, 8)}.zip`;
+      document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); notify("Arquivo de provas exportado.");
+    } catch (error) { notify(error.message); }
+    finally { button.textContent = label; button.disabled = state.records.length === 0; }
+  }
+  if (event.target.closest("#resource-add-field")) addResourceField();
+  if (event.target.closest("#resource-add-row")) addResourceRow();
+  const removeResourceFieldButton = event.target.closest("[data-remove-resource-field]");
+  if (removeResourceFieldButton) removeResourceField(removeResourceFieldButton.dataset.removeResourceField);
+  const removeResourceRowButton = event.target.closest("[data-remove-resource-row]");
+  if (removeResourceRowButton) {
+    state.resourceMaterials.rows = state.resourceMaterials.rows.filter(row => row.id !== removeResourceRowButton.dataset.removeResourceRow);
+    renderResourceMaterials();
+  }
   if (event.target.closest("#new-ficha")) openFichaDialog();
   if (event.target.closest("#empty-action")) state.rpgs.length ? openFichaDialog() : openRpgDialog();
   const edit = event.target.closest("[data-edit]");
@@ -264,6 +457,7 @@ document.addEventListener("click", async event => {
     try {
       await api(`/api/registros/${encodeURIComponent(deleteRecord.dataset.recordDelete)}`, { method: "DELETE" });
       state.records = await api(`/api/fichas/${encodeURIComponent(state.profile.id)}/registros`);
+      $("#export-records").disabled = state.records.length === 0;
       renderRecords(); renderProfileSummary(); notify("Registro excluído e ganhos recalculados.");
     } catch (error) { notify(error.message); }
   }
@@ -280,8 +474,25 @@ document.addEventListener("click", async event => {
 });
 $("#filter-rpg").addEventListener("change", event => { state.rpgFilter = event.target.value; render(); });
 $("#search").addEventListener("input", event => { state.search = event.target.value; render(); });
-document.addEventListener("input", event => { if (event.target.matches('#attributes-rows [data-field="name"]')) refreshAttributeOptions(); });
+document.addEventListener("input", event => {
+  if (event.target.matches('#attributes-rows [data-field="name"]')) refreshAttributeOptions();
+  if (event.target.matches('#attributes-rows [data-field="value"]')) suggestFormula(event.target);
+});
+document.addEventListener("focusin", event => { if (event.target.matches('#attributes-rows [data-field="value"]')) suggestFormula(event.target); });
+document.addEventListener("focusout", event => { if (event.target.matches('#attributes-rows [data-field="value"]')) setTimeout(() => { if (!document.querySelector(".formula-suggestions :focus")) hideFormulaSuggestions(); }, 100); });
+document.addEventListener("input", event => {
+  if (!event.target.matches("[data-resource-row][data-resource-field]")) return;
+  const row = state.resourceMaterials.rows.find(item => item.id === event.target.dataset.resourceRow);
+  if (row) row.values[event.target.dataset.resourceField] = event.target.value;
+});
+document.addEventListener("change", event => {
+  if (event.target.matches("[data-resource-row][data-resource-field]")) renderResourceMaterials();
+});
+$("#resource-sort-field").addEventListener("change", event => { state.resourceSortField = event.target.value; renderResourceMaterials(); });
+$("#resource-sort-direction").addEventListener("change", event => { state.resourceSortDirection = event.target.value; renderResourceMaterials(); });
 document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && document.querySelector(".formula-suggestions")) { hideFormulaSuggestions(); return; }
+  if (event.key === "Enter" && event.target.matches("#resource-field-name")) { event.preventDefault(); addResourceField(); }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); $("#search").focus(); }
   if (event.key === "Escape") { for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close(); }
 });
@@ -296,6 +507,7 @@ $("#ficha-form").addEventListener("submit", async event => {
   event.preventDefault(); showError("#ficha-error", "");
   const ficha = { name: $("#ficha-name").value, rpg_id: $("#ficha-rpg").value, history: $("#ficha-history").value,
     attributes: readRows("attributes"), powers: readRows("powers"), inventory: readRows("inventory"),
+    resource_materials: state.resourceMaterials,
     tags: $("#ficha-tags").value.split(",").map(tag => tag.trim()).filter(Boolean) };
   const id = $("#ficha-id").value;
   try {
@@ -314,6 +526,7 @@ $("#record-form").addEventListener("submit", async event => {
     const payload = { kind: state.recordKind, occurred_on: $("#record-date").value, description: $("#record-description").value, image_data, gains };
     await api(`/api/fichas/${encodeURIComponent(state.profile.id)}/registros`, { method: "POST", body: JSON.stringify(payload) });
     state.records = await api(`/api/fichas/${encodeURIComponent(state.profile.id)}/registros`);
+    $("#export-records").disabled = state.records.length === 0;
     $("#record-form").hidden = true; $("#record-form").reset(); renderRecords(); renderProfileSummary();
     notify("Registro salvo; atributos atuais recalculados.");
   } catch (error) { $("#record-error").textContent = error.message; }
